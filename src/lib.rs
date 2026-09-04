@@ -355,7 +355,9 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn glob_matches_within_one_segment() {
@@ -435,14 +437,16 @@ allowed = ["personal/*"]
 
     impl Fixture {
         fn new() -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("passlint-{}-{nonce}", std::process::id()));
-            fs::create_dir_all(&path).unwrap();
-            Self { path }
+            loop {
+                let nonce = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+                let path =
+                    std::env::temp_dir().join(format!("passlint-{}-{nonce}", std::process::id()));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self { path },
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => panic!("could not create fixture {}: {error}", path.display()),
+                }
+            }
         }
 
         fn write(&self, relative: &str, contents: &str) {
