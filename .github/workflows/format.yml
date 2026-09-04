@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup
+        uses: $/.github/actions/setup
         with:
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
