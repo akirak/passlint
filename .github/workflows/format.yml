@@ -1,0 +1,30 @@
+name: Check format
+on:
+  pull_request:
+    paths-ignore:
+      - 'README.*'
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'README.*'
+  workflow_dispatch:
+jobs:
+  treefmt-nix:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup
+        with:
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Check format
+        run: |
+          system="$(nix eval --expr builtins.currentSystem --impure --raw)"
+          nix build -L ".#checks.$system.treefmt"

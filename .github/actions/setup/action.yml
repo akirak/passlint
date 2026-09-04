@@ -1,0 +1,26 @@
+name: Set up Nix
+
+description: Set up Nix with binary cache enabled
+
+inputs:
+  cachix-name:
+    description: Name of the Cachix account
+    required: false
+    default: akirak
+  cachix-token:
+    description: The auth token for cachix
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe # v31.10.3
+      with:
+        extra_nix_config: |
+          accept-flake-config = true
+
+    - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+      with:
+        name: ${{ inputs.cachix-name }}
+        authToken: '${{ inputs.cachix-token }}'
+        useDaemon: false
