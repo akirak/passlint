@@ -42,6 +42,7 @@ extension = ".age"
 [paths]
 allowed = [
   "infra/aws/<environment>/*",
+  "passwords/<host>",
 ]
 
 [fields.environment]
@@ -57,6 +58,11 @@ The settings have the following meanings:
 - `paths.allowed` — the accepted paths relative to `store.basedir`, with the
   configured extension removed. Within a pattern:
   - A complete path segment written as `<name>` refers to `fields.name`.
+  - The built-in field `<host>` matches a hostname with an optional numeric
+    port, such as `example.com`, `localhost:8080`, or `127.0.0.1:443`. Hostname
+    labels may contain ASCII letters, digits, and internal hyphens; ports range
+    from `0` through `65535`. It does not require a corresponding
+    `[fields.host]` entry.
   - `*` matches any characters within one path segment, and `?` matches one
     character. Wildcards do not cross `/` separators.
 - `fields.name.allowed` — the exact values accepted for the corresponding

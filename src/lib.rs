@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 pub const CONFIG_FILE: &str = "passlint.toml";
+const HOST_FIELD: &str = "host";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -125,6 +126,7 @@ impl LoadedConfig {
         for pattern in &patterns {
             for segment in &pattern.segments {
                 if let Segment::Field(name) = segment
+                    && name != HOST_FIELD
                     && !config.fields.contains_key(name)
                 {
                     return Err(Error::InvalidConfig(format!(
@@ -223,8 +225,15 @@ impl LoadedConfig {
                         break;
                     }
                     Segment::Field(name) => {
-                        let field = &self.config.fields[name];
-                        if !field.allowed.iter().any(|allowed| allowed == value) {
+                        let allowed = if name == HOST_FIELD {
+                            host_matches(value)
+                        } else {
+                            self.config.fields[name]
+                                .allowed
+                                .iter()
+                                .any(|allowed| allowed == value)
+                        };
+                        if !allowed {
                             fields_for_pattern.push(format!(
                                 "field <{name}> has disallowed value {value:?} in pattern {:?}",
                                 pattern.source
@@ -352,6 +361,37 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
     previous[value.len()]
 }
 
+fn host_matches(value: &str) -> bool {
+    let (hostname, port) = match value.split_once(':') {
+        Some((hostname, port)) => (hostname, Some(port)),
+        None => (value, None),
+    };
+
+    if hostname.is_empty()
+        || hostname.len() > 253
+        || !hostname.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && label.as_bytes()[0].is_ascii_alphanumeric()
+                && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+        })
+    {
+        return false;
+    }
+
+    match port {
+        None => true,
+        Some(port) => {
+            !port.is_empty()
+                && port.bytes().all(|byte| byte.is_ascii_digit())
+                && port.parse::<u16>().is_ok()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +405,36 @@ mod tests {
         assert!(glob_matches("prod-*", "prod-api"));
         assert!(glob_matches("??", "ab"));
         assert!(!glob_matches("prod-*", "stage-api"));
+    }
+
+    #[test]
+    fn host_matches_hostname_with_optional_port() {
+        for value in [
+            "localhost",
+            "example.com",
+            "api-1.example.com",
+            "127.0.0.1",
+            "example.com:443",
+            "localhost:0",
+            "localhost:65535",
+        ] {
+            assert!(host_matches(value), "expected {value:?} to match");
+        }
+
+        for value in [
+            "",
+            ".example.com",
+            "example..com",
+            "-example.com",
+            "example-.com",
+            "example.com:",
+            "example.com:http",
+            "example.com:65536",
+            "example.com:80:90",
+            "[::1]:443",
+        ] {
+            assert!(!host_matches(value), "expected {value:?} not to match");
+        }
     }
 
     #[test]
@@ -403,6 +473,37 @@ allowed = ["dev", "stage", "prod"]
         );
         assert!(violations[0].message.contains("<environment>"));
         assert!(violations[0].message.contains("production"));
+    }
+
+    #[test]
+    fn checks_the_builtin_host_field() {
+        let fixture = Fixture::new();
+        fixture.write(
+            CONFIG_FILE,
+            r#"
+[store]
+extension = ".gpg"
+
+[paths]
+allowed = ["servers/<host>"]
+"#,
+        );
+
+        let config = LoadedConfig::load(&fixture.path.join(CONFIG_FILE)).unwrap();
+        let paths = [
+            PathBuf::from("servers/example.com.gpg"),
+            PathBuf::from("servers/example.com:443.gpg"),
+            PathBuf::from("servers/-example.com.gpg"),
+            PathBuf::from("servers/example.com:70000.gpg"),
+        ];
+
+        let violations = config.check_paths(paths.iter());
+        assert_eq!(violations.len(), 2);
+        assert!(
+            violations
+                .iter()
+                .all(|violation| violation.message.contains("<host>"))
+        );
     }
 
     #[test]
